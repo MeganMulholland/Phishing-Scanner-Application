@@ -1,0 +1,24 @@
+# Virtual environments
+venv/
+env/
+.phishing-env/
+*.conda
+
+# Conda environment folders
+anaconda3/
+miniconda3/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# VS Code settings
+.vscode/
+
+# Mac system files
+.DS_Store
