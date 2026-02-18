@@ -23,8 +23,8 @@ __pycache__/
 
 # Mac system files
 .DS_Store
-# Large Data Files
+
 *.csv
 *.zip
-data/raw/
-data/processed/
+data/
+archive*/

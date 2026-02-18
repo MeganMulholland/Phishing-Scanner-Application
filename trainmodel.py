@@ -1,17 +1,23 @@
 import pandas as pd
+import os
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
 # Load cleaned dataset
-DATA_PATH = "../data/processed/phishing_emails_clean.csv"
-df = pd.read_csv(DATA_PATH)
+#DATA_PATH = "../data/processed/phishing_emails_clean.csv"
+# changes this the same as preprocess to match any folder set up
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_PATH = os.path.join(BASE_DIR, "data", "processed", "phishing_emails_clean.csv")
+
+df = pd.read_csv(DATA_PATH, low_memory=False) # make sure it looks through all the data before deciding a type
 
 print("Dataset loaded:", df.shape)
 
 # Features & Labels
 
+df["clean_text"] = df["clean_text"].fillna("").astype(str) #Fill in nas make sure everything is a string
 
 X = df["clean_text"]
 y = df["label_binary"]

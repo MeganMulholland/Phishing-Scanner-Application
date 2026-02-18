@@ -8,7 +8,11 @@ warnings.filterwarnings("ignore", category=MarkupResemblesLocatorWarning)
 # Load and combine all CSV files
 
 
-DATA_DIR = "../data/raw"
+#DATA_DIR = "../data/raw"
+# Fix the data path for easier use
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "data", "raw")
+
 
 all_dfs = []
 
@@ -51,15 +55,21 @@ print(df["body"].iloc[0][:300])
 print("\n--- AFTER ---")
 print(df["clean_text"].iloc[0][:300])
 
+# changed the same thing as train and preprocess to fix the paths.
+# Define base directory relative to this file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# saves processed dataset
+# Define data directories
+DATA_DIR = os.path.join(BASE_DIR, "data")
+PROCESSED_DIR = os.path.join(DATA_DIR, "processed")
 
+# Ensure processed folder exists
+os.makedirs(PROCESSED_DIR, exist_ok=True)
 
-OUTPUT_PATH = "../data/processed/phishing_emails_clean.csv"
+# Define output path
+OUTPUT_PATH = os.path.join(PROCESSED_DIR, "phishing_emails_clean.csv")
 
-# makes sure processed folder exists
-os.makedirs("../data/processed", exist_ok=True)
-
+# Save file
 df.to_csv(OUTPUT_PATH, index=False)
 
 print(f"\nProcessed dataset saved to: {OUTPUT_PATH}")
