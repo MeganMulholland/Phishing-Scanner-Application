@@ -9,6 +9,7 @@ anaconda3/
 miniconda3/
 
 # Python cache
+.idea/
 __pycache__/
 *.pyc
 *.pyo
