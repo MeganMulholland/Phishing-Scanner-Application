@@ -45,9 +45,30 @@ df["label_binary"] = df["label"]
 
 # Drop rows with missing labels
 df = df.dropna(subset=["label_binary"])
+df["label_binary"] = df["label_binary"].astype(int)
 
-# applies preprocessing
-df["clean_text"] = df["body"].astype(str).apply(preprocess_email)
+# Fill missing bodies BEFORE preprocessing
+df["body"] = df["body"].fillna("").astype(str)
+
+# Apply preprocessing
+df["clean_text"] = df["body"].apply(preprocess_email)
+
+# Strip whitespace (important)
+df["clean_text"] = df["clean_text"].astype(str).str.strip()
+
+# Drop rows where preprocessing removed everything
+before = len(df)
+df = df[df["clean_text"] != ""]
+after = len(df)
+
+print(f"Dropped {before - after} rows with empty clean_text")
+
+# Drop exact duplicate emails (prevents train/test leakage). Issues with this! There are duplicates.
+before = len(df)
+df = df.drop_duplicates(subset=["clean_text"])
+after = len(df)
+
+print(f"Dropped {before - after} duplicate emails based on clean_text")
 
 print("\n--- BEFORE ---")
 print(df["body"].iloc[0][:300])
@@ -55,9 +76,6 @@ print(df["body"].iloc[0][:300])
 print("\n--- AFTER ---")
 print(df["clean_text"].iloc[0][:300])
 
-# changed the same thing as train and preprocess to fix the paths.
-# Define base directory relative to this file
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Define data directories
 DATA_DIR = os.path.join(BASE_DIR, "data")
