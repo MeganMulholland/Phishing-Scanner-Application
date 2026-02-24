@@ -10,6 +10,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.frozen import FrozenEstimator
+from sklearn.pipeline import FeatureUnion
+from typing import Union
 
 # ******************************
 # CONFIGURATION / CONSTANTS
@@ -54,10 +56,50 @@ def urgent_language_hits(text: str):
     hits = [w for w in URGENT_WORDS if w in t]
     return hits[:5]  # keep explanations concise
 
+### Adjustments/Helper functions to filter explanations further
+MONTH_DAY_STOP = {
+    "mon","tue","tues","wed","thu","thur","thurs","fri","sat","sun",
+    "jan","feb","mar","apr","may","jun","jul","aug","sep","sept","oct","nov","dec"
+}
+
+def is_good_feature(feat: str) -> bool:
+    if "::" in feat:
+        kind, token = feat.split("::", 1)
+    else:
+        kind, token = "word_tfidf", feat
+
+    raw = token.lower()          # keep raw form for whitespace checks
+    tok = token.strip().lower()  # normalized form for other checks
+
+    # Drop very short word tokens
+    if kind.startswith("word") and len(tok) < 3:
+        return False
+
+    # Drop day/month artifacts (like "jul" or "tue jul")
+    if kind.startswith("word"):
+        parts = tok.split()
+        if parts and all(p in MONTH_DAY_STOP for p in parts):
+            return False
+
+    # KEEP numbers — only drop obvious hashes / IDs (long mostly-alnum strings)
+    alnum = sum(c.isalnum() for c in tok)
+    if len(tok) >= 18 and (alnum / max(1, len(tok))) > 0.9:
+        return False
+
+    # Clean up char n-grams: reject any that include whitespace anywhere
+    if kind.startswith("char"):
+        if any(c.isspace() for c in raw):
+            return False
+
+        letters = sum(c.isalpha() for c in tok)
+        if letters == 0:
+            return False
+
+    return True
 
 def top_weighted_phrases(
     text: str,
-    vectorizer: TfidfVectorizer,
+    vectorizer: Union[TfidfVectorizer, FeatureUnion], #Can choose which one to use
     base_model: LogisticRegression,
     top_k: int = 3
 ):
@@ -80,19 +122,84 @@ def top_weighted_phrases(
 
     # Sort features by descending contribution
     order = np.argsort(contributions)[::-1]
-    feature_names = vectorizer.get_feature_names_out()
 
+    # Can use character n grams or not
+    if isinstance(vectorizer, FeatureUnion):
+        feature_names = []
+        for name, vec in vectorizer.transformer_list:
+            fn = vec.get_feature_names_out()
+            feature_names.extend(f"{name}::{f}" for f in fn)
+    else:
+        feature_names = vectorizer.get_feature_names_out()
+
+## Changed this filter explanations more
     phrases = []
     for idx in order:
         feat = feature_names[row.col[idx]]
         score = float(contributions[idx])
-        if score > 0:
-            phrases.append((feat, score))
+
+        if score <= 0:
+            continue
+
+        if not is_good_feature(feat):
+            continue
+
+        phrases.append((feat, score))
         if len(phrases) >= top_k:
             break
 
+    # Fallback if filtering removed everything
+    if len(phrases) == 0:
+        for idx in order:
+            feat = feature_names[row.col[idx]]
+            score = float(contributions[idx])
+            if score > 0:
+                phrases.append((feat, score))
+            if len(phrases) >= top_k:
+                break
+
     return phrases
 
+# Helper functions to create new thresholds.
+def find_threshold_for_precision(y_true, probs, target_precision=0.99):
+    order = np.argsort(probs)[::-1]
+    y_sorted = y_true.to_numpy()[order]
+    p_sorted = probs[order]
+
+    tp = fp = 0
+    best_t = 1.0
+
+    for i in range(len(p_sorted)):
+        if y_sorted[i] == 1:
+            tp += 1
+        else:
+            fp += 1
+        precision = tp / (tp + fp)
+        if precision >= target_precision:
+            best_t = p_sorted[i]
+
+    return float(best_t)
+
+
+def find_threshold_for_recall(y_true, probs, target_recall=0.99):
+    y_arr = y_true.to_numpy()
+    total_pos = (y_arr == 1).sum()
+    if total_pos == 0:
+        return 0.5
+
+    order = np.argsort(probs)[::-1]
+    y_sorted = y_arr[order]
+    p_sorted = probs[order]
+
+    tp = 0
+    for i in range(len(p_sorted)):
+        if y_sorted[i] == 1:
+            tp += 1
+        recall = tp / total_pos
+        if recall >= target_recall:
+            return float(p_sorted[i])
+
+    return 0.
 
 def tier(prob: float) -> str:
     # Converts the calibrated phishing prob into the 3 tiers.
@@ -154,17 +261,31 @@ print(f"Train size: {len(X_train)} | Calib size: {len(X_calib)} | Test size: {le
 
 
 # ******************************
-# TEXT VECTORIZATION (TF-IDF)
+# TEXT VECTORIZATION (WORD + CHAR TF-IDF)
 # ********************************
+# Added character n grams
+vectorizer = FeatureUnion([
+    (
+        "word_tfidf",
+        TfidfVectorizer(
+            analyzer="word",
+            ngram_range=(1, 2),
+            max_features=8000,
+            stop_words="english"
+        )
+    ),
+    (
+        "char_tfidf",
+        TfidfVectorizer(
+            analyzer="char",
+            ngram_range=(3, 5),
+            min_df=5,
+            max_features=4000
+        )
+    ),
+])
 
-# Word + bigram TF-IDF representation. Same as OG
-vectorizer = TfidfVectorizer(
-    max_features=10000,
-    ngram_range=(1, 2),
-    stop_words="english"
-)
-
-# Fit ONLY on training data. important!!
+# Fit ONLY on training data
 X_train_tfidf = vectorizer.fit_transform(X_train)
 X_calib_tfidf = vectorizer.transform(X_calib)
 X_test_tfidf = vectorizer.transform(X_test)
@@ -195,6 +316,27 @@ cal_model = CalibratedClassifierCV(
     cv=5
 )
 cal_model.fit(X_calib_tfidf, y_calib)
+
+#Tune thresholds using calibration data. Solves the problem of scattered thresholds
+cal_probs = cal_model.predict_proba(X_calib_tfidf)[:, 1]
+
+T_PHISHING = find_threshold_for_precision(
+    y_calib, cal_probs, target_precision=0.99
+)
+
+T_SUSPICIOUS = find_threshold_for_recall(
+    y_calib, cal_probs, target_recall=0.99
+)
+
+# Safety: enforce ordering
+if T_SUSPICIOUS > T_PHISHING:
+    T_SUSPICIOUS = max(0.0, T_PHISHING - 0.05)
+
+print(
+    f"\nTuned thresholds:"
+    f" T_SUSPICIOUS={T_SUSPICIOUS:.3f},"
+    f" T_PHISHING={T_PHISHING:.3f}"
+)
 
 # ******************************************
 # Evaluation with the calibrated probabilities
@@ -263,3 +405,26 @@ for _, row in flagged.iterrows():
     print("Email preview:", text[:250].replace("\n", " "))
 
 
+######################
+# Adding a joblib file
+# lets app just load one file and work
+##########################
+import joblib
+from pathlib import Path
+
+MODEL_DIR = Path(BASE_DIR) / "models"
+MODEL_DIR.mkdir(exist_ok=True)
+
+artifact = {
+    "vectorizer": vectorizer,
+    "base_model": base_model,   # for top_weighted_phrases()
+    "cal_model": cal_model,     # for predict_proba()
+    "thresholds": {
+        "T_SUSPICIOUS": T_SUSPICIOUS,
+        "T_PHISHING": T_PHISHING,
+    },
+    "urgent_words": URGENT_WORDS,
+}
+
+joblib.dump(artifact, MODEL_DIR / "phishing_artifact.joblib")
+print("Saved model artifact to:", MODEL_DIR / "phishing_artifact.joblib")
