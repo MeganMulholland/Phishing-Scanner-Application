@@ -17,11 +17,13 @@ from typing import Union
 # CONFIGURATION / CONSTANTS
 # **********************************
 
-# Base directory (so paths work regardless of where script is run)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Path to cleaned dataset created by preprocessing script
-DATA_PATH = os.path.join(BASE_DIR, "data", "processed", "phishing_emails_clean.csv")
+
+# Project root (one level above model/)
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Path to cleaned dataset
+DATA_PATH = os.path.join(BASE_DIR, "dataloader", "data", "processed", "phishing_emails_clean.csv")
 
 # Tier thresholds (empirically chosen)
 # SAFE        : p < 0.30
