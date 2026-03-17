@@ -28,3 +28,11 @@ __pycache__/
 *.zip
 data/
 archive*/
+
+models/
+*.joblib
+*.safetensors
+*.pt
+*.bin
+*.pth
+checkpoints/
