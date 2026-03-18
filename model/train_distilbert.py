@@ -69,6 +69,11 @@ URGENT_WORDS = [
 MODEL_DIR = BASE_DIR / "models" / "distilbert_phishing"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
+# Recovery / testing mode switch:
+# True  -> retrain from HuggingFace base model and save a fresh good model
+# False -> load the already-saved trained model from MODEL_DIR and skip retraining
+TRAIN_MODE = True
+
 # --------------------------------------------------------
 # HELPER FUNCTIONS
 # --------------------------------------------------------
@@ -90,18 +95,21 @@ def urgent_language_hits(text: str):
     return hits[:5]
 
 
+# Determine a probability threshold that achieves the desired precision.
+# This is useful for determining the "LIKELY_PHISHING" threshold
+# where we want extremely few false positives. Same exact concept as previous training model.
+
+# Have to change this again. At first it was not strict enough and then it was too strict and caused the recall to collapse.
 def find_threshold_for_precision(y_true, probs, target_precision=0.99):
-    """
-    Determine a probability threshold that achieves the desired precision.
-    This is useful for determining the "LIKELY_PHISHING" threshold
-    where we want extremely few false positives. Same exact concept as previous training model.
-    """
     order = np.argsort(probs)[::-1]
     y_sorted = y_true.to_numpy()[order]
     p_sorted = probs[order]
 
+    total_pos = np.sum(y_sorted == 1)
+
     tp = fp = 0
     best_t = 1.0
+    best_recall = -1.0
 
     for i in range(len(p_sorted)):
         if y_sorted[i] == 1:
@@ -110,12 +118,13 @@ def find_threshold_for_precision(y_true, probs, target_precision=0.99):
             fp += 1
 
         precision = tp / (tp + fp)
+        recall = tp / total_pos if total_pos > 0 else 0.0
 
-        if precision >= target_precision:
+        if precision >= target_precision and recall > best_recall:
+            best_recall = recall
             best_t = p_sorted[i]
 
     return float(best_t)
-
 
 def find_threshold_for_recall(y_true, probs, target_recall=0.99):
     """
@@ -143,10 +152,100 @@ def find_threshold_for_recall(y_true, probs, target_recall=0.99):
 
     return 0.0
 
+# edit the thresholds updated
+def find_percentile_thresholds(y_true, probs, legit_pct=99, phishing_pct=10):
+    """
+    Determine thresholds using both classes:
+
+    T_SUSPICIOUS = high percentile of legitimate-email probabilities
+    T_PHISHING   = lower percentile of phishing-email probabilities
+
+    This creates a middle band for uncertain emails.
+    """
+    y_arr = y_true.to_numpy() if hasattr(y_true, "to_numpy") else np.asarray(y_true)
+
+    legit_probs = probs[y_arr == 0]
+    phishing_probs = probs[y_arr == 1]
+
+    if len(legit_probs) == 0 or len(phishing_probs) == 0:
+        return 0.30, 0.80
+
+    t_suspicious = float(np.percentile(legit_probs, legit_pct))
+    t_phishing = float(np.percentile(phishing_probs, phishing_pct))
+
+    # If overlap is too extreme, fall back to fixed thresholds
+    if t_suspicious >= t_phishing:
+        return 0.30, 0.80
+
+    return t_suspicious, t_phishing
+
+# Robust threshold tuning:
+# Use legit-email probabilities to define the suspicious boundary,
+# then search for a likely-phishing threshold that keeps precision high
+# without allowing the threshold to become unrealistically strict.
+def find_thresholds_robust(y_true, probs, legit_pct=99, min_precision=0.98, max_threshold=0.95):
+    """
+    Determine thresholds for the 3-tier system in a more stable way.
+
+    T_SUSPICIOUS:
+        High percentile of legitimate-email probabilities.
+        This keeps most legitimate emails in SAFE.
+
+    T_PHISHING:
+        Search across candidate thresholds and choose the one with the
+        best recall among thresholds that still satisfy a minimum precision.
+        Also cap the threshold so it cannot drift too close to 1.0.
+    """
+    y_arr = y_true.to_numpy() if hasattr(y_true, "to_numpy") else np.asarray(y_true)
+
+    legit_probs = probs[y_arr == 0]
+
+    # Default lower threshold if class split is somehow broken
+    if len(legit_probs) == 0:
+        t_suspicious = 0.30
+    else:
+        t_suspicious = float(np.percentile(legit_probs, legit_pct))
+
+    # Start with a sensible fallback value
+    best_t = 0.80
+    best_recall = -1.0
+
+    # Search only within a practical range.
+    # Lower bound stays above suspicious threshold and not below 0.50.
+    search_start = max(t_suspicious + 1e-4, 0.50)
+    search_end = max_threshold
+
+    # If suspicious threshold is already too high, fall back safely
+    if search_start >= search_end:
+        return min(t_suspicious, 0.70), max(0.80, min(0.95, t_suspicious + 0.10))
+
+    candidate_thresholds = np.linspace(search_start, search_end, 200)
+
+    for t in candidate_thresholds:
+        preds = (probs >= t).astype(int)
+
+        tp = ((preds == 1) & (y_arr == 1)).sum()
+        fp = ((preds == 1) & (y_arr == 0)).sum()
+        fn = ((preds == 0) & (y_arr == 1)).sum()
+
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+
+        # Keep the threshold that meets the precision requirement
+        # while preserving as much recall as possible.
+        if precision >= min_precision and recall > best_recall:
+            best_recall = recall
+            best_t = float(t)
+
+    # Final safety check so likely-phishing remains above suspicious
+    if best_t <= t_suspicious:
+        best_t = min(max(t_suspicious + 0.10, 0.80), max_threshold)
+
+    return t_suspicious, best_t
 
 def tier(prob: float) -> str:
 
-    #Convert a phishing probability into the app’s three-tier risk classification.
+    # Convert a phishing probability into the app’s three-tier risk classification.
 
     if prob >= T_PHISHING:
         return "LIKELY_PHISHING"
@@ -244,7 +343,9 @@ test_ds = Dataset.from_pandas(
 # --------------------------------------------------------
 
 # Load tokenizer corresponding to DistilBERT
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+# If a trained tokenizer already exists, use it in test mode.
+tokenizer_source = MODEL_DIR if (not TRAIN_MODE and (MODEL_DIR / "tokenizer_config.json").exists()) else MODEL_NAME
+tokenizer = AutoTokenizer.from_pretrained(tokenizer_source)
 
 def tokenize(batch):
     """
@@ -272,8 +373,20 @@ test_ds.set_format(type="torch", columns=["input_ids", "attention_mask", "label"
 # LOAD MODEL
 # --------------------------------------------------------
 
+# Train mode must load from the HuggingFace base checkpoint to recover the good model.
+# Test mode loads the already-saved trained model from MODEL_DIR.
+if TRAIN_MODE:
+    model_source = MODEL_NAME
+else:
+    if not (MODEL_DIR / "config.json").exists():
+        raise FileNotFoundError(
+            f"No saved trained model found at {MODEL_DIR}. "
+            "Set TRAIN_MODE = True to retrain and save a fresh model."
+        )
+    model_source = MODEL_DIR
+
 model = AutoModelForSequenceClassification.from_pretrained(
-    MODEL_NAME,
+    model_source,
     num_labels=2,
     id2label={0: "LEGITIMATE", 1: "PHISHING"},
     label2id={"LEGITIMATE": 0, "PHISHING": 1}
@@ -284,21 +397,22 @@ model = AutoModelForSequenceClassification.from_pretrained(
 # --------------------------------------------------------
 
 # Remember to adjust after adding other made dataset
+# save_strategy="no" avoids filling storage with checkpoint folders
+# load_best_model_at_end must be False when save_strategy="no"
 
 training_args = TrainingArguments(
     output_dir=str(MODEL_DIR / "checkpoints"),
-    evaluation_strategy="epoch", #eval_strategy not compatible with this transformers version
-    save_strategy="epoch",
+    evaluation_strategy="epoch",  # eval_strategy not compatible with this transformers version
+    save_strategy="no",
     logging_strategy="epoch",
     learning_rate=2e-5,
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
     num_train_epochs=3,
     weight_decay=0.01,
-    load_best_model_at_end=True,
+    load_best_model_at_end=False,
     metric_for_best_model="f1",
     greater_is_better=True,
-    save_total_limit=2,
     report_to="none"
 )
 
@@ -315,7 +429,8 @@ trainer = Trainer(
 # TRAIN MODEL
 # --------------------------------------------------------
 
-trainer.train()
+if TRAIN_MODE:
+    trainer.train()
 
 # --------------------------------------------------------
 # THRESHOLD TUNING
@@ -328,9 +443,40 @@ calib_probs = torch.softmax(
     torch.tensor(calib_logits), dim=1
 ).numpy()[:, 1]
 
-T_PHISHING = find_threshold_for_precision(y_calib, calib_probs)
-T_SUSPICIOUS = find_threshold_for_recall(y_calib, calib_probs)
+# Old threshold methods kept here for reference:
+# T_PHISHING = find_threshold_for_precision(y_calib, calib_probs)
+# T_SUSPICIOUS = find_threshold_for_recall(y_calib, calib_probs)
 
+# Fixing the thresholds
+# Old percentile version kept for reference:
+# T_SUSPICIOUS, T_PHISHING = find_percentile_thresholds(
+#     y_calib,
+#     calib_probs,
+#     legit_pct=99,
+#     phishing_pct=10
+# )
+
+# Robust threshold tuning:
+# - suspicious threshold from legit distribution
+# - likely-phishing threshold from precision/recall search with guardrails
+T_SUSPICIOUS, T_PHISHING = find_thresholds_robust(
+    y_calib,
+    calib_probs,
+    legit_pct=99,
+    min_precision=0.98,
+    max_threshold=0.95
+)
+
+# debugging
+y_calib_arr = y_calib.to_numpy() if hasattr(y_calib, "to_numpy") else np.asarray(y_calib)
+
+legit_probs = calib_probs[y_calib_arr == 0]
+phishing_probs = calib_probs[y_calib_arr == 1]
+
+print("Legit min/max:", legit_probs.min(), legit_probs.max())
+print("Phishing min/max:", phishing_probs.min(), phishing_probs.max())
+print("Legit percentiles:", np.percentile(legit_probs, [90, 95, 99, 99.5, 99.9]))
+print("Phishing percentiles:", np.percentile(phishing_probs, [0.1, 1, 5, 10, 25, 50]))
 print(
     f"\nTuned thresholds:"
     f" T_SUSPICIOUS={T_SUSPICIOUS:.3f},"
@@ -355,26 +501,44 @@ y_pred_strict = (y_probs >= T_PHISHING).astype(int)
 print("\nSTRICT (only Likely=phishing)")
 print(confusion_matrix(y_test, y_pred_strict))
 print(classification_report(y_test, y_pred_strict, zero_division=0))
+print("Example probs:", calib_probs[:10])
+
+# Optional: see how many emails fall into each tier
+tier_counts = pd.Series(tiers).value_counts()
+print("\nTier counts:")
+print(tier_counts)
+
+# Optional: evaluate the full risky band too
+# This treats both SUSPICIOUS and LIKELY_PHISHING as flagged
+y_pred_risky = (y_probs >= T_SUSPICIOUS).astype(int)
+
+print("\nRISKY (Suspicious + Likely Phishing)")
+print(confusion_matrix(y_test, y_pred_risky))
+print(classification_report(y_test, y_pred_risky, zero_division=0))
 
 # --------------------------------------------------------
 # SAVE MODEL FOR APPLICATION
 # --------------------------------------------------------
 
 # When using in app need a separate "prediction wrapper" since it is not a joblib.
-trainer.save_model(str(MODEL_DIR))
-tokenizer.save_pretrained(str(MODEL_DIR))
+# Only save after an actual training run so we do not overwrite a good model during threshold-only testing.
+if TRAIN_MODE:
+    trainer.save_model(str(MODEL_DIR))
+    tokenizer.save_pretrained(str(MODEL_DIR))
 
-artifact_config = {
-    "model_name": MODEL_NAME,
-    "thresholds": {
-        "T_SUSPICIOUS": float(T_SUSPICIOUS),
-        "T_PHISHING": float(T_PHISHING)
-    },
-    "urgent_words": URGENT_WORDS,
-    "max_length": 256
-}
+    artifact_config = {
+        "model_name": MODEL_NAME,
+        "thresholds": {
+            "T_SUSPICIOUS": float(T_SUSPICIOUS),
+            "T_PHISHING": float(T_PHISHING)
+        },
+        "urgent_words": URGENT_WORDS,
+        "max_length": 256
+    }
 
-with open(MODEL_DIR / "artifact_config.json", "w") as f:
-    json.dump(artifact_config, f, indent=2)
+    with open(MODEL_DIR / "artifact_config.json", "w") as f:
+        json.dump(artifact_config, f, indent=2)
 
-print("Saved DistilBERT model to:", MODEL_DIR)
+    print("Saved DistilBERT model to:", MODEL_DIR)
+else:
+    print("Test mode: model not re-saved.")
