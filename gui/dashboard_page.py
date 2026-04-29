@@ -86,13 +86,15 @@ def move_to_spam(mail, e_id):
 
         if result[0] == "OK":
             mail.store(e_id, "+FLAGS", "\\Deleted")
-            mail.expunge()
             print("Moved email to spam")
+            return True
         else:
-            print("Failed to copy to spam")
+            print("Failed to copy to spam:", result)
+            return False
 
     except Exception as e:
         print("Spam move error:", e)
+        return False
 
 class DashboardPage:
 
@@ -127,30 +129,68 @@ class DashboardPage:
         self.label_font = font.Font(family="Asul", size=12, weight="bold")
 
         # -----------------------------
-        # Scan Emails Button (red text)
+        # Header
         # -----------------------------
+        header_frame = tk.Frame(self.frame, bg="#f0f8ff")
+        header_frame.pack(fill="x", pady=(10, 15))
+
+        tk.Label(
+            header_frame,
+            text="Phishy Scanner",
+            font=("Asul", 26, "bold"),
+            bg="#f0f8ff",
+            fg="#1E3A5F"
+        ).pack()
+
+        tk.Label(
+            header_frame,
+            text="AI-powered email phishing detection",
+            font=("Asul", 11),
+            bg="#f0f8ff",
+            fg="#4F6F8F"
+        ).pack(pady=(2, 8))
+
+        # -----------------------------
+        # Button row
+        # -----------------------------
+        button_frame = tk.Frame(self.frame, bg="#f0f8ff")
+        button_frame.pack(pady=(0, 8))
+
         tk.Button(
-            self.frame, text="Scan Emails", font=self.label_font,
-            fg="red", bg="#add8e6", activebackground="#87ceeb",
+            button_frame,
+            text="Scan Emails",
+            font=self.label_font,
+            fg="white",
+            bg="#1E90FF",
+            activebackground="#187bcd",
+            activeforeground="white",
+            width=16,
             command=self.fetch_emails
-        ).pack(pady=10)
+        ).pack(side="left", padx=8)
+
+        tk.Button(
+            button_frame,
+            text="View Analytics",
+            font=self.label_font,
+            fg="white",
+            bg="#4F6F8F",
+            activebackground="#3f596f",
+            activeforeground="white",
+            width=16,
+            command=self.open_analytics
+        ).pack(side="left", padx=8)
+
+        # -----------------------------
+        # Status label
+        # -----------------------------
         self.status_label = tk.Label(
             self.frame,
             text="Ready to scan emails",
-            font=self.label_font,
+            font=("Asul", 11, "bold"),
             bg="#f0f8ff",
-            fg="black"
+            fg="#4F6F8F"
         )
-        self.status_label.pack(pady=5)
-
-        tk.Button(
-            self.frame,
-            text="View Analytics",
-            font=self.label_font,
-            bg="#add8e6",
-            command=self.open_analytics
-        ).pack(pady=5)
-
+        self.status_label.pack(pady=(0, 10))
         # -----------------------------
         # Treeview + Scrollbars
         # -----------------------------
@@ -274,9 +314,13 @@ class DashboardPage:
                 e_id = self.email_id_map.get(row_id)
 
                 if e_id:
-                    move_to_spam(self.mail, e_id)
-                    self.quarantined_count += 1
-                    self.tree.delete(row_id)
+                    success = move_to_spam(self.mail, e_id)
+
+                    if success:
+                        self.quarantined_count += 1
+                        self.tree.delete(row_id)
+                    else:
+                        messagebox.showerror("Error", "Could not move this email to spam.")
 
     class AnalyticsPage:
 
