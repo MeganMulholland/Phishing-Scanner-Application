@@ -76,5 +76,9 @@ class LoginPage:
             # Launch Dashboard
             DashboardPage(self.root, mail)
 
-        except:
-            messagebox.showerror("Error", "Login failed")
+        #except:
+           # messagebox.showerror("Error", "Login failed")
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Login failed:\n{e}")
+            print("Login failed:", e)

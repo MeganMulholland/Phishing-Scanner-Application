@@ -1,32 +1,85 @@
 import tkinter as tk
 from tkinter import ttk, font
 import email
-import joblib
+#import joblib
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-from preprocess.preprocess import preprocess_email
-from IMAP.imapconnect import decode_str, get_body
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import torch
+import torch.nn.functional as F
 
+from preprocessing.preprocess import preprocess_email
+
+from IMAP.imapconnect import decode_str, get_body
+from tkinter import messagebox
 # Load model
-artifact = joblib.load("models/phishing_artifact.joblib")
-vectorizer = artifact["vectorizer"]
-cal_model = artifact["cal_model"]
-T_SUSPICIOUS = artifact["thresholds"]["T_SUSPICIOUS"]
-T_PHISHING = artifact["thresholds"]["T_PHISHING"]
+#artifact = joblib.load("models/phishing_artifact.joblib")
+#vectorizer = artifact["vectorizer"]
+#cal_model = artifact["cal_model"]
+#T_SUSPICIOUS = artifact["thresholds"]["T_SUSPICIOUS"]
+#T_PHISHING = artifact["thresholds"]["T_PHISHING"]
+
+# Load DistilBERT model
+MODEL_PATH = "models/distilbert_phishing"
+
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+model.eval()
+
+# Use GPU if available
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+model.to(device)
+
+# Thresholds
+T_SUSPICIOUS = 0.226
+T_PHISHING = 0.831
 
 def predict_email(text):
     clean = preprocess_email(text)
-    X = vectorizer.transform([clean])
-    prob = cal_model.predict_proba(X)[0][1]
-    if prob >= T_PHISHING:
+
+    inputs = tokenizer(
+        clean,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        max_length=512
+    )
+
+    inputs = {key: value.to(device) for key, value in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model(**inputs)
+        probs = F.softmax(outputs.logits, dim=1)
+
+    phishing_prob = probs[0][1].item()
+
+    if phishing_prob >= T_PHISHING:
         tier = "LIKELY_PHISHING"
-    elif prob >= T_SUSPICIOUS:
+    elif phishing_prob >= T_SUSPICIOUS:
         tier = "SUSPICIOUS"
     else:
         tier = "SAFE"
-    return tier, prob
 
+    return tier, phishing_prob
+# Adding explanations
+def has_url(text):
+    return "http" in text or "www" in text
+
+urgent_words = ["urgent", "immediately", "verify", "suspend", "password", "login", "account"]
+
+def get_explanation(text):
+    reasons = []
+
+    text_lower = text.lower()
+
+    if has_url(text_lower):
+        reasons.append("Contains link")
+
+    if any(word in text_lower for word in urgent_words):
+        reasons.append("Uses urgent language")
+
+    return reasons
 def move_to_spam(mail, e_id):
     try:
         result = mail.copy(e_id, "[Gmail]/Spam")
@@ -50,6 +103,7 @@ class DashboardPage:
         self.suspicious_count = 0
         self.phishing_count = 0
         self.quarantined_count = 0
+        self.email_id_map = {}
 
         # -----------------------------
         # Outer frame: light blue, white, gold layered border
@@ -80,6 +134,14 @@ class DashboardPage:
             fg="red", bg="#add8e6", activebackground="#87ceeb",
             command=self.fetch_emails
         ).pack(pady=10)
+        self.status_label = tk.Label(
+            self.frame,
+            text="Ready to scan emails",
+            font=self.label_font,
+            bg="#f0f8ff",
+            fg="black"
+        )
+        self.status_label.pack(pady=5)
 
         tk.Button(
             self.frame,
@@ -90,15 +152,55 @@ class DashboardPage:
         ).pack(pady=5)
 
         # -----------------------------
-        # Treeview with blue row effect
+        # Treeview + Scrollbars
         # -----------------------------
-        columns = ("Sender", "Subject", "Tier", "Score")
-        self.tree = ttk.Treeview(self.frame, columns=columns, show="headings", height=20)
+        columns = ("Action", "Sender", "Subject", "Tier", "Score", "Reasoning")
+
+        # Frame to hold tree + scrollbars
+        tree_frame = tk.Frame(self.frame)
+        tree_frame.pack(fill="both", expand=True)
+
+        # Scrollbars
+        scroll_y = tk.Scrollbar(tree_frame, orient="vertical")
+        scroll_x = tk.Scrollbar(tree_frame, orient="horizontal")
+
+        # Treeview
+        self.tree = ttk.Treeview(
+            tree_frame,
+            columns=columns,
+            show="headings",
+            height=20,
+            yscrollcommand=scroll_y.set,
+            xscrollcommand=scroll_x.set
+        )
+
+        # Configure scrollbars
+        scroll_y.config(command=self.tree.yview)
+        scroll_x.config(command=self.tree.xview)
+
+        # Pack scrollbars and tree
+        scroll_y.pack(side="right", fill="y")
+        scroll_x.pack(side="bottom", fill="x")
+        self.tree.pack(side="left", fill="both", expand=True)
+
+        self.tree.bind("<ButtonRelease-1>", self.handle_tree_click)
+
+        # Column setup
         for col in columns:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=200)
-        self.tree.pack(fill="both", expand=True)
 
+            if col == "Score":
+                self.tree.column(col, width=80, anchor="center")
+            elif col == "Tier":
+                self.tree.column(col, width=150, anchor="center")
+            elif col == "Sender":
+                self.tree.column(col, width=200)
+            elif col == "Subject":
+                self.tree.column(col, width=300)
+            elif col == "Reasoning":
+                self.tree.column(col, width=250)
+            elif col == "Action":
+                self.tree.column(col, width=120, anchor="center")
         # -----------------------------
         # Style the Treeview
         # -----------------------------
@@ -119,6 +221,62 @@ class DashboardPage:
             background=[("selected", "#add8e6")],
             foreground=[("selected", "black")]
         )
+        self.tree.tag_configure("SAFE", background="#d4edda")
+        self.tree.tag_configure("SUSPICIOUS", background="#fff3cd")
+        self.tree.tag_configure("LIKELY_PHISHING", background="#f8d7da")
+        self.tree.bind("<Double-1>", self.show_email_details)
+
+    def show_email_details(self, event):
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        values = self.tree.item(selected[0], "values")
+
+        action, sender, subject, tier, score, reason = values
+
+        window = tk.Toplevel()
+        window.title("Email Details")
+
+        tk.Label(window, text=f"Sender: {sender}").pack()
+        tk.Label(window, text=f"Subject: {subject}").pack()
+        tk.Label(window, text=f"Tier: {tier}").pack()
+        tk.Label(window, text=f"Score: {score}").pack()
+        tk.Label(window, text=f"Reason: {reason}").pack()
+
+    def handle_tree_click(self, event):
+        row_id = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+
+        if not row_id:
+            return
+
+        # Action column is the first column
+        if column == "#1":
+            values = self.tree.item(row_id, "values")
+            subject = values[2]
+            tier = values[3]
+            score = values[4]
+            reason = values[5]
+
+            confirm = messagebox.askyesno(
+                "Move to Spam?",
+                f"""Move this email to spam?
+            
+    Subject: {subject}
+    Classification: {tier}
+    Score: {score}
+    Reason: {reason}
+    """
+            )
+
+            if confirm:
+                e_id = self.email_id_map.get(row_id)
+
+                if e_id:
+                    move_to_spam(self.mail, e_id)
+                    self.quarantined_count += 1
+                    self.tree.delete(row_id)
 
     class AnalyticsPage:
 
@@ -188,10 +346,14 @@ class DashboardPage:
     # Fetch emails function
     # -----------------------------
     def fetch_emails(self):
+
+        self.status_label.config(text="Scanning emails... please wait", fg="blue")
+        self.frame.update_idletasks()
         self.mail.select("INBOX")
         status, messages = self.mail.search(None, "UNSEEN")
         email_ids = messages[0].split()
         for e_id in email_ids:
+            self.frame.update_idletasks()
 
             status, msg_data = self.mail.fetch(e_id, "(RFC822)")
 
@@ -221,6 +383,10 @@ class DashboardPage:
 
             tier, prob = predict_email(email_text)
 
+            # Adding in reasons
+            reasons = get_explanation(email_text)
+            reason_str = ", ".join(reasons) if reasons else "No obvious red flags"
+
             if tier == "SAFE":
                 self.safe_count += 1
 
@@ -229,10 +395,17 @@ class DashboardPage:
 
             elif tier == "LIKELY_PHISHING":
                 self.phishing_count += 1
-                self.quarantined_count += 1
-                move_to_spam(self.mail, e_id)
 
-            self.tree.insert("", "end", values=(sender, subject, tier, f"{prob:.2f}"))
+            self.frame.update_idletasks()
+            item_id = self.tree.insert(
+                "", "end",
+                values=("Move to spam", sender, subject, tier, f"{prob:.4f}", reason_str),
+                tags=(tier,)
+            )
+            self.email_id_map[item_id] = e_id
+        self.status_label.config(text="Scan complete", fg="green")
+        self.frame.update_idletasks()
+
 
 class AnalyticsPage:
 

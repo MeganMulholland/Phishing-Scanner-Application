@@ -6,7 +6,6 @@ from dotenv import load_dotenv
 from pathlib import Path
 
 # Load credentials from .env
-
 env_path = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(env_path)
 
@@ -15,11 +14,13 @@ IMAP_SERVER = "imap.gmail.com"
 EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT")
 APP_PASSWORD = os.getenv("APP_PASSWORD")
 
-# Debug check
+# Debug check (optional)
 print("EMAIL:", EMAIL_ACCOUNT)
 print("PASSWORD:", APP_PASSWORD)
 
-# decode email headers
+# -----------------------------
+# Helper functions (USED BY GUI)
+# -----------------------------
 
 def decode_str(s):
     if not s:
@@ -29,8 +30,6 @@ def decode_str(s):
         return decoded.decode(charset or "utf-8", errors="ignore")
     return decoded
 
-
-# extract body text
 
 def get_body(msg):
     if msg.is_multipart():
@@ -51,56 +50,49 @@ def get_body(msg):
     return ""
 
 
-# Connect + login
+# -----------------------------
+# ONLY RUN THIS WHEN FILE IS RUN DIRECTLY
+# -----------------------------
+if __name__ == "__main__":
 
-try:
-    mail = imaplib.IMAP4_SSL(IMAP_SERVER)
-    mail.login(EMAIL_ACCOUNT, APP_PASSWORD)
-    print("Logged into IMAP server")
-except imaplib.IMAP4.error as e:
-    print("Login failed:", e)
-    exit()
+    try:
+        mail = imaplib.IMAP4_SSL(IMAP_SERVER)
+        mail.login(EMAIL_ACCOUNT, APP_PASSWORD)
+        print("Logged into IMAP server")
+    except imaplib.IMAP4.error as e:
+        print("Login failed:", e)
+        exit()
 
+    mail.select("INBOX")
 
-# Select inbox
-
-mail.select("INBOX")
-
-# Search unread emails
-status, messages = mail.search(None, "UNSEEN")
-
-if status != "OK":
-    print("Failed to retrieve messages")
-    exit()
-
-email_ids = messages[0].split()
-
-print(f"Found {len(email_ids)} unread emails\n")
-
-
-# Process emails
-
-for e_id in email_ids:
-    status, msg_data = mail.fetch(e_id, "(BODY.PEEK[])")
+    status, messages = mail.search(None, "UNSEEN")
 
     if status != "OK":
-        print("Failed to fetch email")
-        continue
+        print("Failed to retrieve messages")
+        exit()
 
-    raw_email = msg_data[0][1]
-    msg = email.message_from_bytes(raw_email)
+    email_ids = messages[0].split()
 
-    subject = decode_str(msg.get("Subject"))
-    from_ = decode_str(msg.get("From"))
-    body = get_body(msg)
+    print(f"Found {len(email_ids)} unread emails\n")
 
-    print("From:", from_)
-    print("Subject:", subject)
-    print("Body preview:", body[:200])
-    print("-" * 50)
+    for e_id in email_ids:
+        status, msg_data = mail.fetch(e_id, "(BODY.PEEK[])")
 
+        if status != "OK":
+            print("Failed to fetch email")
+            continue
 
-# Logout cleanly
+        raw_email = msg_data[0][1]
+        msg = email.message_from_bytes(raw_email)
 
-mail.logout()
-print("Logged out")
+        subject = decode_str(msg.get("Subject"))
+        from_ = decode_str(msg.get("From"))
+        body = get_body(msg)
+
+        print("From:", from_)
+        print("Subject:", subject)
+        print("Body preview:", body[:200])
+        print("-" * 50)
+
+    mail.logout()
+    print("Logged out")
