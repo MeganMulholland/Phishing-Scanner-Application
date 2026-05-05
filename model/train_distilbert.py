@@ -283,7 +283,18 @@ def compute_metrics(eval_pred):
 # LOAD DATASET
 # --------------------------------------------------------
 
+if not DATA_PATH.exists():
+    raise FileNotFoundError(
+        f"Dataset not found at {DATA_PATH}. "
+        "Make sure data/processed/phishing_emails_clean.csv exists."
+    )
 df = pd.read_csv(DATA_PATH, low_memory=False)
+
+required_cols = {"clean_text", "label_binary"}
+missing = required_cols - set(df.columns)
+
+if missing:
+    raise ValueError(f"Dataset missing required columns: {missing}")
 
 print("Dataset loaded:", df.shape)
 print("Processed CSV path:", DATA_PATH)
@@ -535,21 +546,25 @@ results_df = pd.DataFrame({
     "predicted_strict": y_pred_strict,
     "predicted_risky": y_pred_risky
 })
-
-results_df.to_csv(results_dir / "distilbert_test_predictions.csv", index=False)
+try:
+    results_df.to_csv(results_dir / "distilbert_test_predictions.csv", index=False)
+except Exception as e:
+    print("Failed to save results to CSV:", e)
 
 # Save classification reports
-with open(results_dir / "distilbert_test_report.txt", "w") as f:
-    f.write("STRICT MODE: LIKELY_PHISHING only\n")
-    f.write(str(confusion_matrix(y_test, y_pred_strict)))
-    f.write("\n\n")
-    f.write(classification_report(y_test, y_pred_strict, zero_division=0))
+try:
+    with open(results_dir / "distilbert_test_report.txt", "w") as f:
+        f.write("STRICT MODE: LIKELY_PHISHING only\n")
+        f.write(str(confusion_matrix(y_test, y_pred_strict)))
+        f.write("\n\n")
+        f.write(classification_report(y_test, y_pred_strict, zero_division=0))
 
-    f.write("\n\nRISKY MODE: SUSPICIOUS + LIKELY_PHISHING\n")
-    f.write(str(confusion_matrix(y_test, y_pred_risky)))
-    f.write("\n\n")
-    f.write(classification_report(y_test, y_pred_risky, zero_division=0))
-
+        f.write("\n\nRISKY MODE: SUSPICIOUS + LIKELY_PHISHING\n")
+        f.write(str(confusion_matrix(y_test, y_pred_risky)))
+        f.write("\n\n")
+        f.write(classification_report(y_test, y_pred_risky, zero_division=0))
+except Exception as e:
+    print("Failed to save report: ", e)
 # Save confusion matrix image for slides
 disp = ConfusionMatrixDisplay.from_predictions(
     y_test,
