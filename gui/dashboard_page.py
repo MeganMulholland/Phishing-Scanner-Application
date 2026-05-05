@@ -13,22 +13,25 @@ import email
 # import joblib
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 import torch.nn.functional as F
-
-from preprocess.preprocess import preprocess_email
-
+from preprocessing.preprocess import preprocess_email
 from IMAP.imapconnect import decode_str, get_body
 from tkinter import messagebox
 
-# Load model
-# artifact = joblib.load("models/phishing_artifact.joblib")
-# vectorizer = artifact["vectorizer"]
-# cal_model = artifact["cal_model"]
-# T_SUSPICIOUS = artifact["thresholds"]["T_SUSPICIOUS"]
-# T_PHISHING = artifact["thresholds"]["T_PHISHING"]
+# Color palette
+BG_COLOR = "#EEF6F1"          # soft sage
+CARD_COLOR = "#F8FBF9"        # near-white sage
+PRIMARY_BLUE = "#1E3A5F"      # dark blue
+SAGE_GREEN = "#9CAF88"
+LIGHT_BLUE = "#D9EAF7"
+BUTTON_BLUE = "#1E90FF"
+BUTTON_DARK = "#1E3A5F"
+SAFE_GREEN = "#D4EDDA"
+WARNING_YELLOW = "#FFF3CD"
+DANGER_RED = "#F8D7DA"
+TEXT_GRAY = "#4F6F8F"
 
 # Load DistilBERT model
 model_dir = resource_path("models/distilbert_phishing")
@@ -169,19 +172,19 @@ class DashboardPage:
         # -----------------------------
         # Outer frame: light blue, white, gold layered border
         # -----------------------------
-        outer_blue = tk.Frame(root, bg="#add8e6", bd=5)
+        outer_blue = tk.Frame(root, bg=PRIMARY_BLUE, bd=5)
         outer_blue.pack(padx=5, pady=5, fill="both", expand=True)
 
-        outer_white = tk.Frame(outer_blue, bg="white", bd=5)
-        outer_white.pack(padx=5, pady=5, fill="both", expand=True)
+        outer_sage = tk.Frame(outer_blue, bg=SAGE_GREEN, bd=5)
+        outer_sage.pack(padx=5, pady=5, fill="both", expand=True)
 
-        outer_gold = tk.Frame(outer_white, bg="#fffacd", bd=5)
-        outer_gold.pack(padx=5, pady=5, fill="both", expand=True)
+        outer_card = tk.Frame(outer_sage, bg=CARD_COLOR, bd=5)
+        outer_card.pack(padx=5, pady=5, fill="both", expand=True)
 
         # -----------------------------
         # Main inner frame
         # -----------------------------
-        self.frame = tk.Frame(outer_gold, bg="#f0f8ff")  # light blue background inside
+        self.frame = tk.Frame(outer_card, bg=BG_COLOR)
         self.frame.pack(padx=10, pady=10, fill="both", expand=True)
 
         # Fonts
@@ -190,29 +193,29 @@ class DashboardPage:
         # -----------------------------
         # Header
         # -----------------------------
-        header_frame = tk.Frame(self.frame, bg="#f0f8ff")
+        header_frame = tk.Frame(self.frame, bg=BG_COLOR)
         header_frame.pack(fill="x", pady=(10, 15))
 
         tk.Label(
             header_frame,
             text="Phishy Scanner",
             font=("Asul", 26, "bold"),
-            bg="#f0f8ff",
-            fg="#1E3A5F"
+            bg=BG_COLOR,
+            fg=PRIMARY_BLUE
         ).pack()
 
         tk.Label(
             header_frame,
             text="AI-powered email phishing detection",
             font=("Asul", 11),
-            bg="#f0f8ff",
-            fg="#4F6F8F"
+            bg=BG_COLOR,
+            fg=TEXT_GRAY
         ).pack(pady=(2, 8))
 
         # -----------------------------
         # Button row
         # -----------------------------
-        button_frame = tk.Frame(self.frame, bg="#f0f8ff")
+        button_frame = tk.Frame(self.frame, bg=BG_COLOR)
         button_frame.pack(pady=(0, 8))
 
         tk.Button(
@@ -220,8 +223,8 @@ class DashboardPage:
             text="Scan Emails",
             font=self.label_font,
             fg="white",
-            bg="#1E90FF",
-            activebackground="#187bcd",
+            bg=SAGE_GREEN,
+            activebackground="#7F936F",
             activeforeground="white",
             width=16,
             command=self.fetch_emails
@@ -310,19 +313,19 @@ class DashboardPage:
             "Treeview",
             font=("Asul", 10),
             rowheight=25,
-            background="#f0f8ff",
-            fieldbackground="#f0f8ff",
-            bordercolor="#1E90FF",  # blue border-like effect
+            background=CARD_COLOR,
+            fieldbackground=CARD_COLOR,
+            bordercolor = PRIMARY_BLUE,  # blue border-like effect
             borderwidth=1
         )
         style.map(
             "Treeview",
-            background=[("selected", "#add8e6")],
+            background=[("selected", LIGHT_BLUE)],
             foreground=[("selected", "black")]
         )
-        self.tree.tag_configure("SAFE", background="#d4edda")
-        self.tree.tag_configure("SUSPICIOUS", background="#fff3cd")
-        self.tree.tag_configure("LIKELY_PHISHING", background="#f8d7da")
+        self.tree.tag_configure("SAFE", background=SAFE_GREEN)
+        self.tree.tag_configure("SUSPICIOUS", background=WARNING_YELLOW)
+        self.tree.tag_configure("LIKELY_PHISHING", background=DANGER_RED)
         self.tree.bind("<Double-1>", self.show_email_details)
 
     def show_email_details(self, event):
@@ -514,6 +517,15 @@ class DashboardPage:
             self.email_id_map[item_id] = e_id
         self.status_label.config(text="Scan complete", fg="green")
         self.frame.update_idletasks()
+
+        if self.suspicious_count > 0 or self.phishing_count > 0:
+            messagebox.showwarning(
+                "Potential Phishing Emails Found",
+                f"PhishyScanner found {self.suspicious_count} suspicious email(s) "
+                f"and {self.phishing_count} likely phishing email(s).\n\n"
+                "Please review these emails carefully. If you do not recognize the sender "
+                "or the message seems unsafe, use the 'Move to Spam' option."
+            )
 
 
 class AnalyticsPage:
