@@ -559,6 +559,14 @@ disp = ConfusionMatrixDisplay.from_predictions(
 plt.title("DistilBERT Confusion Matrix - Risky Mode")
 plt.savefig(results_dir / "distilbert_confusion_matrix.png", dpi=300, bbox_inches="tight")
 plt.close()
+disp2 = ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    y_pred_strict,
+    display_labels=["Legitimate", "Phishing"]
+)
+plt.title("DistilBERT Confusion Matrix - Strict Mode")
+plt.savefig(results_dir / "distilbert_confusion_matrixstrict.png", dpi=300, bbox_inches="tight")
+plt.close()
 
 print("Saved presentation results to:", results_dir)
 

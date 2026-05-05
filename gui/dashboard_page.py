@@ -1,7 +1,16 @@
+import os
+import sys
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except AttributeError:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
 import tkinter as tk
 from tkinter import ttk, font
 import email
-#import joblib
+# import joblib
 from matplotlib import pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -9,22 +18,23 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import torch
 import torch.nn.functional as F
 
-from preprocessing.preprocess import preprocess_email
+from preprocess.preprocess import preprocess_email
 
 from IMAP.imapconnect import decode_str, get_body
 from tkinter import messagebox
+
 # Load model
-#artifact = joblib.load("models/phishing_artifact.joblib")
-#vectorizer = artifact["vectorizer"]
-#cal_model = artifact["cal_model"]
-#T_SUSPICIOUS = artifact["thresholds"]["T_SUSPICIOUS"]
-#T_PHISHING = artifact["thresholds"]["T_PHISHING"]
+# artifact = joblib.load("models/phishing_artifact.joblib")
+# vectorizer = artifact["vectorizer"]
+# cal_model = artifact["cal_model"]
+# T_SUSPICIOUS = artifact["thresholds"]["T_SUSPICIOUS"]
+# T_PHISHING = artifact["thresholds"]["T_PHISHING"]
 
 # Load DistilBERT model
-MODEL_PATH = "models/distilbert_phishing"
+model_dir = resource_path("models/distilbert_phishing")
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
-model = AutoModelForSequenceClassification.from_pretrained(MODEL_PATH)
+tokenizer = AutoTokenizer.from_pretrained(model_dir)
+model = AutoModelForSequenceClassification.from_pretrained(model_dir)
 model.eval()
 
 # Use GPU if available
@@ -34,6 +44,7 @@ model.to(device)
 # Thresholds
 T_SUSPICIOUS = 0.226
 T_PHISHING = 0.831
+
 
 def predict_email(text):
     clean = preprocess_email(text)
@@ -62,11 +73,15 @@ def predict_email(text):
         tier = "SAFE"
 
     return tier, phishing_prob
+
+
 # Adding explanations
 def has_url(text):
     return "http" in text or "www" in text
 
+
 urgent_words = ["urgent", "immediately", "verify", "suspend", "password", "login", "account"]
+
 
 def get_explanation(text):
     reasons = []
@@ -80,6 +95,8 @@ def get_explanation(text):
         reasons.append("Uses urgent language")
 
     return reasons
+
+
 def move_to_spam(mail, e_id):
     try:
         result = mail.copy(e_id, "[Gmail]/Spam")
@@ -95,6 +112,7 @@ def move_to_spam(mail, e_id):
     except Exception as e:
         print("Spam move error:", e)
         return False
+
 
 class DashboardPage:
 
@@ -302,7 +320,7 @@ class DashboardPage:
             confirm = messagebox.askyesno(
                 "Move to Spam?",
                 f"""Move this email to spam?
-            
+
     Subject: {subject}
     Classification: {tier}
     Score: {score}
@@ -386,6 +404,7 @@ class DashboardPage:
             self.phishing_count,
             self.quarantined_count
         )
+
     # -----------------------------
     # Fetch emails function
     # -----------------------------
@@ -454,7 +473,6 @@ class DashboardPage:
 class AnalyticsPage:
 
     def __init__(self, root, safe, suspicious, phishing, quarantined):
-
         root.title("Scan Analytics")
         root.geometry("600x500")
         root.configure(bg="#f0f8ff")
@@ -485,7 +503,7 @@ class AnalyticsPage:
         labels = ["Safe", "Suspicious", "Phishing"]
         values = [safe, suspicious, phishing]
 
-        fig, ax = plt.subplots(figsize=(4,4))
+        fig, ax = plt.subplots(figsize=(4, 4))
 
         ax.pie(
             values,
