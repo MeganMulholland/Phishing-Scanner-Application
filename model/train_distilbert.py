@@ -72,7 +72,7 @@ MODEL_DIR.mkdir(parents=True, exist_ok=True)
 # Recovery / testing mode switch:
 # True  -> retrain from HuggingFace base model and save a fresh good model
 # False -> load the already-saved trained model from MODEL_DIR and skip retraining
-TRAIN_MODE = True
+TRAIN_MODE = False
 
 # --------------------------------------------------------
 # HELPER FUNCTIONS
@@ -515,6 +515,52 @@ y_pred_risky = (y_probs >= T_SUSPICIOUS).astype(int)
 print("\nRISKY (Suspicious + Likely Phishing)")
 print(confusion_matrix(y_test, y_pred_risky))
 print(classification_report(y_test, y_pred_risky, zero_division=0))
+
+# --------------------------------------------------------
+# SAVE FINAL TEST RESULTS FOR PRESENTATION
+# --------------------------------------------------------
+
+from sklearn.metrics import ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+
+results_dir = BASE_DIR / "results"
+results_dir.mkdir(parents=True, exist_ok=True)
+
+# Save per-email test results
+results_df = pd.DataFrame({
+    "email_text": X_test.values,
+    "true_label": y_test.values,
+    "phishing_probability": y_probs,
+    "tier": tiers,
+    "predicted_strict": y_pred_strict,
+    "predicted_risky": y_pred_risky
+})
+
+results_df.to_csv(results_dir / "distilbert_test_predictions.csv", index=False)
+
+# Save classification reports
+with open(results_dir / "distilbert_test_report.txt", "w") as f:
+    f.write("STRICT MODE: LIKELY_PHISHING only\n")
+    f.write(str(confusion_matrix(y_test, y_pred_strict)))
+    f.write("\n\n")
+    f.write(classification_report(y_test, y_pred_strict, zero_division=0))
+
+    f.write("\n\nRISKY MODE: SUSPICIOUS + LIKELY_PHISHING\n")
+    f.write(str(confusion_matrix(y_test, y_pred_risky)))
+    f.write("\n\n")
+    f.write(classification_report(y_test, y_pred_risky, zero_division=0))
+
+# Save confusion matrix image for slides
+disp = ConfusionMatrixDisplay.from_predictions(
+    y_test,
+    y_pred_risky,
+    display_labels=["Legitimate", "Phishing"]
+)
+plt.title("DistilBERT Confusion Matrix - Risky Mode")
+plt.savefig(results_dir / "distilbert_confusion_matrix.png", dpi=300, bbox_inches="tight")
+plt.close()
+
+print("Saved presentation results to:", results_dir)
 
 # --------------------------------------------------------
 # SAVE MODEL FOR APPLICATION

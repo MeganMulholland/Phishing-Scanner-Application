@@ -1,0 +1,26 @@
+STRICT MODE: LIKELY_PHISHING only
+[[8373   70]
+ [  76 7685]]
+
+              precision    recall  f1-score   support
+
+           0       0.99      0.99      0.99      8443
+           1       0.99      0.99      0.99      7761
+
+    accuracy                           0.99     16204
+   macro avg       0.99      0.99      0.99     16204
+weighted avg       0.99      0.99      0.99     16204
+
+
+RISKY MODE: SUSPICIOUS + LIKELY_PHISHING
+[[8335  108]
+ [  47 7714]]
+
+              precision    recall  f1-score   support
+
+           0       0.99      0.99      0.99      8443
+           1       0.99      0.99      0.99      7761
+
+    accuracy                           0.99     16204
+   macro avg       0.99      0.99      0.99     16204
+weighted avg       0.99      0.99      0.99     16204
