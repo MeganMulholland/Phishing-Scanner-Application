@@ -20,6 +20,54 @@ from preprocessing.preprocess import preprocess_email
 from IMAP.imapconnect import decode_str, get_body
 from tkinter import messagebox
 
+import re
+
+TRUSTED_DOMAINS = [
+    "spotify.com",
+    "discord.com",
+    "m.discord.com",
+    "google.com",
+    "accounts.google.com",
+    "youtube.com",
+    "github.com",
+    "linkedin.com",
+    "amazon.com",
+    "paypal.com",
+    "apple.com",
+    "icloud.com",
+    "microsoft.com",
+    "outlook.com",
+    "office.com",
+    "netflix.com",
+    "hulu.com",
+    "target.com",
+    "walmart.com",
+    "facebookmail.com"
+]
+
+def extract_sender_domain(sender):
+    match = re.search(r'@([\w\.-]+)', sender.lower())
+    return match.group(1) if match else ""
+
+def is_trusted_sender(sender):
+    domain = extract_sender_domain(sender)
+    return (
+        domain in TRUSTED_DOMAINS
+        or any(domain.endswith("." + d) for d in TRUSTED_DOMAINS)
+    )
+
+def adjust_tier_for_trusted_sender(sender, tier, prob):
+    if not is_trusted_sender(sender):
+        return tier
+
+    if tier == "LIKELY_PHISHING" and prob < 0.95:
+        return "SUSPICIOUS"
+
+    if tier == "SUSPICIOUS" and prob < 0.80:
+        return "SAFE"
+
+    return tier
+
 # Color palette
 BG_COLOR = "#EEF6F1"          # soft sage
 CARD_COLOR = "#F8FBF9"        # near-white sage
@@ -143,21 +191,24 @@ def get_explanation(text):
 
 def move_to_spam(mail, e_id):
     try:
-        result = mail.copy(e_id, "[Gmail]/Spam")
+        copy_result = mail.uid("COPY", e_id, "[Gmail]/Spam")
 
-        if result[0] == "OK":
-            mail.store(e_id, "+FLAGS", "\\Deleted")
-            print("Moved email to spam")
-            return True
-        else:
-            print("Failed to copy to spam:", result)
+        if copy_result[0] != "OK":
+            print("Failed to copy to spam:", e_id, copy_result)
             return False
 
+        delete_result = mail.uid("STORE", e_id, "+FLAGS", "(\\Deleted)")
+
+        if delete_result[0] != "OK":
+            print("Failed to mark deleted:", e_id, delete_result)
+            return False
+
+        print("Moved email to spam:", e_id)
+        return True
+
     except Exception as e:
-        print("Spam move error:", e)
+        print("Spam move error:", e_id, e)
         return False
-
-
 class DashboardPage:
 
     def __init__(self, root, mail):
@@ -256,7 +307,7 @@ class DashboardPage:
         # -----------------------------
         # Treeview + Scrollbars
         # -----------------------------
-        columns = ("Action", "Sender", "Subject", "Tier", "Score", "Reasoning")
+        columns = ("Status", "Sender", "Subject", "Tier", "Score", "Reasoning")
 
         # Frame to hold tree + scrollbars
         tree_frame = tk.Frame(self.frame)
@@ -285,7 +336,7 @@ class DashboardPage:
         scroll_x.pack(side="bottom", fill="x")
         self.tree.pack(side="left", fill="both", expand=True)
 
-        self.tree.bind("<ButtonRelease-1>", self.handle_tree_click)
+       # self.tree.bind("<ButtonRelease-1>", self.handle_tree_click)
 
         # Column setup
         for col in columns:
@@ -328,6 +379,44 @@ class DashboardPage:
         self.tree.tag_configure("LIKELY_PHISHING", background=DANGER_RED)
         self.tree.bind("<Double-1>", self.show_email_details)
 
+        # -----------------------------
+        # Spam action buttons
+        # -----------------------------
+        action_frame = tk.Frame(self.frame, bg=BG_COLOR)
+        action_frame.pack(pady=10)
+
+        tk.Label(
+            action_frame,
+            text="Select one or more emails, then choose an action.",
+            bg=BG_COLOR,
+            fg=TEXT_GRAY,
+            font=("Asul", 10)
+        ).pack(pady=(0, 5))
+
+        tk.Button(
+            action_frame,
+            text="Select All Likely Phishing",
+            font=self.label_font,
+            bg=SAGE_GREEN,
+            fg="white",
+            activebackground="#7F936F",
+            activeforeground="white",
+            width=24,
+            command=self.select_all_likely_phishing
+        ).pack(side="left", padx=8)
+
+        tk.Button(
+            action_frame,
+            text="Move Selected to Spam",
+            font=self.label_font,
+            bg=DANGER_RED,
+            fg="black",
+            activebackground="#e0aeb5",
+            activeforeground="black",
+            width=22,
+            command=self.move_selected_to_spam
+        ).pack(side="left", padx=8)
+
     def show_email_details(self, event):
         selected = self.tree.selection()
         if not selected:
@@ -335,7 +424,7 @@ class DashboardPage:
 
         values = self.tree.item(selected[0], "values")
 
-        action, sender, subject, tier, score, reason = values
+        status, sender, subject, tier, score, reason = values
 
         window = tk.Toplevel()
         window.title("Email Details")
@@ -448,7 +537,87 @@ class DashboardPage:
             self.phishing_count,
             self.quarantined_count
         )
+# Function for the button
+    def select_all_likely_phishing(self):
+        self.tree.selection_remove(self.tree.selection())
 
+        selected_count = 0
+
+        for row_id in self.tree.get_children():
+            values = self.tree.item(row_id, "values")
+
+            if len(values) >= 4:
+                tier = values[3]
+
+                if tier == "LIKELY_PHISHING":
+                    self.tree.selection_add(row_id)
+                    selected_count += 1
+
+        if selected_count == 0:
+            messagebox.showinfo(
+                "No Likely Phishing Emails",
+                "There are no likely phishing emails to select."
+            )
+        else:
+            self.status_label.config(
+                text=f"Selected {selected_count} likely phishing email(s)",
+                fg=PRIMARY_BLUE
+            )
+
+    def move_selected_to_spam(self):
+        selected_rows = list(self.tree.selection())  # important: freeze selection first
+
+        if not selected_rows:
+            messagebox.showinfo("No Selection", "Please select at least one email first.")
+            return
+
+        confirm = messagebox.askyesno(
+            "Move Selected Emails to Spam?",
+            f"Move {len(selected_rows)} selected email(s) to spam?"
+        )
+
+        if not confirm:
+            return
+
+        moved_rows = []
+        failed_count = 0
+
+        for row_id in selected_rows:
+            e_id = self.email_id_map.get(row_id)
+
+            if not e_id:
+                failed_count += 1
+                continue
+
+            success = move_to_spam(self.mail, e_id)
+
+            if success:
+                moved_rows.append(row_id)
+                self.quarantined_count += 1
+            else:
+                failed_count += 1
+
+        # Actually remove deleted emails from the inbox after all moves
+        try:
+            self.mail.expunge()
+        except Exception as e:
+            print("Expunge error:", e)
+
+        # Delete rows from the GUI after IMAP operations finish
+        for row_id in moved_rows:
+            self.tree.delete(row_id)
+            self.email_id_map.pop(row_id, None)
+
+        self.status_label.config(
+            text=f"Moved {len(moved_rows)} email(s) to spam. Failed: {failed_count}",
+            fg="green" if failed_count == 0 else "red"
+        )
+
+        if failed_count > 0:
+            messagebox.showwarning(
+                "Some Emails Were Not Moved",
+                f"{failed_count} selected email(s) could not be moved to spam."
+            )
     # -----------------------------
     # Fetch emails function
     # -----------------------------
@@ -457,13 +626,28 @@ class DashboardPage:
         self.status_label.config(text="Scanning emails... please wait", fg="blue")
         self.frame.update_idletasks()
         self.mail.select("INBOX")
-        status, messages = self.mail.search(None, "UNSEEN")
-        email_ids = messages[0].split()
+        try:
+            status, _ = self.mail.select("INBOX")
+            if status != "OK":
+                messagebox.showerror("Mailbox Error", "Could not open INBOX.")
+                return
+
+            status, messages = self.mail.uid("search", None, "UNSEEN")
+
+            if status != "OK" or not messages or not messages[0]:
+                self.status_label.config(text="No unread emails found", fg="green")
+                return
+
+            email_ids = messages[0].split()
+
+        except Exception as e:
+            messagebox.showerror("IMAP Error", f"Could not search inbox:\n{e}")
+            return
+
         for e_id in email_ids:
             self.frame.update_idletasks()
 
-            status, msg_data = self.mail.fetch(e_id, "(RFC822)")
-
+            status, msg_data = self.mail.uid("fetch", e_id, "(RFC822)")
             # Check fetch success
             if status != "OK":
                 print("Fetch failed")
@@ -491,12 +675,17 @@ class DashboardPage:
             # Handle prediction failure per email. Won't crash
             try:
                 tier, prob = predict_email(email_text)
+                tier = adjust_tier_for_trusted_sender(sender, tier, prob)
             except Exception as e:
                 print("Prediction failed for email:", e)
                 tier, prob = "SUSPICIOUS", 0.0
 
             # Adding in reasons
             reasons = get_explanation(email_text)
+
+            if is_trusted_sender(sender):
+                reasons.append("Trusted sender detected")
+
             reason_str = ", ".join(reasons) if reasons else "No obvious red flags"
 
             if tier == "SAFE":
@@ -511,7 +700,7 @@ class DashboardPage:
             self.frame.update_idletasks()
             item_id = self.tree.insert(
                 "", "end",
-                values=("Move to spam", sender, subject, tier, f"{prob:.4f}", reason_str),
+                values=("Review", sender, subject, tier, f"{prob:.4f}", reason_str),
                 tags=(tier,)
             )
             self.email_id_map[item_id] = e_id
