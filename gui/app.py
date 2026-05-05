@@ -12,4 +12,7 @@ def run_app():
     root.mainloop()
 
 if __name__ == "__main__":
-    run_app()
+    try:
+        run_app()
+    except Exception as e:
+        print(f"Application failed to start: {e}")

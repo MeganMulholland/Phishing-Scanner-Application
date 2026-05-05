@@ -1,8 +1,9 @@
 import tkinter as tk
 from tkinter import messagebox, font
-import imaplib
 from gui.dashboard_page import DashboardPage
+from IMAP.imapconnect import connect_to_gmail
 
+# Solely handles the GUI
 class LoginPage:
 
     def __init__(self, root):
@@ -63,9 +64,14 @@ class LoginPage:
         email_user = self.email_entry.get()
         password = self.password_entry.get()
 
+        email_user = email_user.strip()
+
+        if not email_user or not password:
+            messagebox.showerror("Missing Input", "Please enter both your email and app password.")
+            return
+
         try:
-            mail = imaplib.IMAP4_SSL("imap.gmail.com")
-            mail.login(email_user, password)
+            mail = connect_to_gmail(email_user, password)
 
             messagebox.showinfo("Success", "Connected to Gmail")
 

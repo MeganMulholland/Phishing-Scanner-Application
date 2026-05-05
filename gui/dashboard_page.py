@@ -33,9 +33,18 @@ from tkinter import messagebox
 # Load DistilBERT model
 model_dir = resource_path("models/distilbert_phishing")
 
-tokenizer = AutoTokenizer.from_pretrained(model_dir)
-model = AutoModelForSequenceClassification.from_pretrained(model_dir)
-model.eval()
+if not os.path.isdir(model_dir):
+    raise FileNotFoundError(
+        f"Model folder not found: {model_dir}. "
+        "Make sure models/distilbert_phishing is included."
+    )
+
+try:
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+    model.eval()
+except OSError as e:
+    raise RuntimeError(f"Could not load DistilBERT model from {model_dir}: {e}")
 
 # Use GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,45 +56,56 @@ T_PHISHING = 0.831
 
 
 def predict_email(text):
-    clean = preprocess_email(text)
+    try:
+        # Handle empty or malformed email text
+        if not isinstance(text, str) or not text.strip():
+            return "SUSPICIOUS", 0.0
 
-    inputs = tokenizer(
-        clean,
-        return_tensors="pt",
-        truncation=True,
-        padding=True,
-        max_length=512
-    )
+        clean = preprocess_email(text)
 
-    inputs = {key: value.to(device) for key, value in inputs.items()}
+        inputs = tokenizer(
+            clean,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=512
+        )
 
-    with torch.no_grad():
-        outputs = model(**inputs)
-        probs = F.softmax(outputs.logits, dim=1)
+        inputs = {key: value.to(device) for key, value in inputs.items()}
 
-    phishing_prob = probs[0][1].item()
+        with torch.no_grad():
+            outputs = model(**inputs)
+            probs = F.softmax(outputs.logits, dim=1)
 
-    if phishing_prob >= T_PHISHING:
-        tier = "LIKELY_PHISHING"
-    elif phishing_prob >= T_SUSPICIOUS:
-        tier = "SUSPICIOUS"
-    else:
-        tier = "SAFE"
+        phishing_prob = probs[0][1].item()
 
-    return tier, phishing_prob
+        if phishing_prob >= T_PHISHING:
+            tier = "LIKELY_PHISHING"
+        elif phishing_prob >= T_SUSPICIOUS:
+            tier = "SUSPICIOUS"
+        else:
+            tier = "SAFE"
 
+        return tier, phishing_prob
+
+    except Exception as e:
+        print("Prediction error:", e)
+        return "SUSPICIOUS", 0.0
 
 # Adding explanations
 def has_url(text):
     return "http" in text or "www" in text
 
-
-urgent_words = ["urgent", "immediately", "verify", "suspend", "password", "login", "account"]
-
-
+# more urgent words
+urgent_words = [
+    "urgent", "immediately", "asap", "action required", "act now",
+    "verify", "verification", "confirm", "password", "login",
+    "account", "suspend", "suspended", "locked", "security alert",
+    "unusual activity", "unauthorized", "reset", "expires"
+]
+# added more reasons!
 def get_explanation(text):
     reasons = []
-
     text_lower = text.lower()
 
     if has_url(text_lower):
@@ -93,6 +113,27 @@ def get_explanation(text):
 
     if any(word in text_lower for word in urgent_words):
         reasons.append("Uses urgent language")
+
+    if any(word in text_lower for word in ["verify", "confirm", "update", "validate"]):
+        reasons.append("Requests account verification")
+
+    if any(word in text_lower for word in ["password", "login", "sign in", "credentials"]):
+        reasons.append("Mentions login or password")
+
+    if any(word in text_lower for word in ["suspended", "locked", "disabled", "unusual activity", "unauthorized"]):
+        reasons.append("Threatens account restriction")
+
+    if any(word in text_lower for word in ["invoice", "payment", "billing", "refund", "charge"]):
+        reasons.append("Mentions payment or billing")
+
+    if any(word in text_lower for word in ["click here", "open attachment", "download", "view document"]):
+        reasons.append("Encourages clicking or downloading")
+
+    if any(word in text_lower for word in ["limited time", "act now", "expires", "deadline"]):
+        reasons.append("Creates time pressure")
+
+    if any(word in text_lower for word in ["congratulations", "winner", "prize", "reward", "gift card"]):
+        reasons.append("Uses reward or prize language")
 
     return reasons
 
@@ -433,8 +474,8 @@ class DashboardPage:
             try:
                 raw_email = msg_data[0][1]
                 msg = email.message_from_bytes(raw_email)
-            except:
-                print("Failed to parse email")
+            except Exception as e:
+                print("Failed to parse email: ", e)
                 continue
 
             subject = decode_str(msg.get("Subject"))
@@ -444,7 +485,12 @@ class DashboardPage:
             # Combine subject + body
             email_text = subject + " " + body
 
-            tier, prob = predict_email(email_text)
+            # Handle prediction failure per email. Won't crash
+            try:
+                tier, prob = predict_email(email_text)
+            except Exception as e:
+                print("Prediction failed for email:", e)
+                tier, prob = "SUSPICIOUS", 0.0
 
             # Adding in reasons
             reasons = get_explanation(email_text)
