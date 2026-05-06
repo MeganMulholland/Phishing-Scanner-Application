@@ -1,4 +1,5 @@
 import os
+import json
 import sys
 
 def resource_path(relative_path):
@@ -23,26 +24,76 @@ from tkinter import messagebox
 import re
 
 TRUSTED_DOMAINS = [
+    # Spotify
     "spotify.com",
+
+    # Discord
     "discord.com",
     "m.discord.com",
+
+    # Google
     "google.com",
     "accounts.google.com",
+    "mail.google.com",
     "youtube.com",
-    "github.com",
-    "linkedin.com",
-    "amazon.com",
-    "paypal.com",
-    "apple.com",
-    "icloud.com",
+
+    # Microsoft
     "microsoft.com",
     "outlook.com",
     "office.com",
+    "live.com",
+
+    # Apple
+    "apple.com",
+    "icloud.com",
+
+    # Amazon
+    "amazon.com",
+
+    # Social / networking
+    "linkedin.com",
+    "facebookmail.com",
+    "instagram.com",
+    "x.com",
+    "twitter.com",
+
+    # Development / school
+    "github.com",
+    "gitlab.com",
+
+    # Streaming / entertainment
     "netflix.com",
     "hulu.com",
+    "disneyplus.com",
+
+    # Shopping
     "target.com",
     "walmart.com",
-    "facebookmail.com"
+    "bestbuy.com",
+    "ebay.com",
+
+    # Payments
+    "paypal.com",
+    "venmo.com",
+    "cash.app",
+
+    # Food / delivery
+    "doordash.com",
+    "ubereats.com",
+    "grubhub.com",
+
+    # Travel
+    "airbnb.com",
+    "expedia.com",
+    "delta.com",
+
+    # Communication
+    "zoom.us",
+    "slack.com",
+
+    # Education
+    "instructure.com",   # Canvas LMS
+    "duolingo.com"
 ]
 
 def extract_sender_domain(sender):
@@ -249,7 +300,7 @@ class DashboardPage:
 
         tk.Label(
             header_frame,
-            text="Phishy Scanner",
+            text="PhishyScanner",
             font=("Asul", 26, "bold"),
             bg=BG_COLOR,
             fg=PRIMARY_BLUE
@@ -257,7 +308,7 @@ class DashboardPage:
 
         tk.Label(
             header_frame,
-            text="AI-powered email phishing detection",
+            text="Machine Learning-Based Email Threat Detection",
             font=("Asul", 11),
             bg=BG_COLOR,
             fg=TEXT_GRAY
@@ -473,59 +524,6 @@ class DashboardPage:
                     else:
                         messagebox.showerror("Error", "Could not move this email to spam.")
 
-    class AnalyticsPage:
-
-        def __init__(self, root, safe, suspicious, phishing, quarantined):
-            root.title("Scan Analytics")
-            root.geometry("500x400")
-            root.configure(bg="#f0f8ff")
-
-            label_font = font.Font(family="Asul", size=14, weight="bold")
-
-            tk.Label(
-                root,
-                text="Email Scan Results",
-                font=("Asul", 18, "bold"),
-                bg="#f0f8ff"
-            ).pack(pady=20)
-
-            tk.Label(
-                root,
-                text=f"Safe Emails: {safe}",
-                font=label_font,
-                bg="#f0f8ff"
-            ).pack(pady=5)
-
-            tk.Label(
-                root,
-                text=f"Suspicious Emails: {suspicious}",
-                font=label_font,
-                bg="#f0f8ff"
-            ).pack(pady=5)
-
-            tk.Label(
-                root,
-                text=f"Likely Phishing Emails: {phishing}",
-                font=label_font,
-                bg="#f0f8ff"
-            ).pack(pady=5)
-
-            tk.Label(
-                root,
-                text=f"Emails Quarantined (Spam): {quarantined}",
-                font=label_font,
-                bg="#f0f8ff"
-            ).pack(pady=20)
-
-            # Final message
-            tk.Label(
-                root,
-                text="You have been cleansed!",
-                font=("Asul", 16, "bold"),
-                fg="#1E90FF",
-                bg="#f0f8ff"
-            ).pack(side="bottom", pady=30)
-
     def open_analytics(self):
 
         analytics_window = tk.Toplevel()
@@ -717,62 +715,124 @@ class DashboardPage:
             )
 
 
+#more polished analytics page
 class AnalyticsPage:
 
     def __init__(self, root, safe, suspicious, phishing, quarantined):
-        root.title("Scan Analytics")
-        root.geometry("600x500")
-        root.configure(bg="#f0f8ff")
+        root.title("PhishyScanner Analytics")
+        root.geometry("650x550")
+        root.configure(bg=BG_COLOR)
 
-        label_font = font.Font(family="Asul", size=14, weight="bold")
+        label_font = font.Font(family="Asul", size=13)
+        header_font = font.Font(family="Asul", size=20, weight="bold")
+        card_font = font.Font(family="Asul", size=12, weight="bold")
 
-        if safe + suspicious + phishing == 0:
-            safe, suspicious, phishing = 1, 1, 1
+        total = safe + suspicious + phishing
+
+        if total == 0:
+            chart_values = [1, 1, 1]
+        else:
+            chart_values = [safe, suspicious, phishing]
+
+        # Header
+        tk.Label(
+            root,
+            text="Scan Analytics",
+            font=header_font,
+            bg=BG_COLOR,
+            fg=PRIMARY_BLUE
+        ).pack(pady=(20, 5))
 
         tk.Label(
             root,
-            text="Email Scan Results",
-            font=("Asul", 18, "bold"),
-            bg="#f0f8ff"
-        ).pack(pady=10)
+            text="Summary of scanned email classifications",
+            font=label_font,
+            bg=BG_COLOR,
+            fg=TEXT_GRAY
+        ).pack(pady=(0, 15))
 
-        # -----------------------------
-        # Email counts
-        # -----------------------------
-        tk.Label(root, text=f"Safe Emails: {safe}", font=label_font, bg="#f0f8ff").pack()
-        tk.Label(root, text=f"Suspicious Emails: {suspicious}", font=label_font, bg="#f0f8ff").pack()
-        tk.Label(root, text=f"Likely Phishing Emails: {phishing}", font=label_font, bg="#f0f8ff").pack()
-        tk.Label(root, text=f"Emails Quarantined (Spam): {quarantined}", font=label_font, bg="#f0f8ff").pack(pady=10)
+        # Summary card frame
+        card_frame = tk.Frame(root, bg=BG_COLOR)
+        card_frame.pack(pady=10)
 
-        # -----------------------------
-        # Create pie chart
-        # -----------------------------
+        def create_card(parent, title, value, color):
+            card = tk.Frame(
+                parent,
+                bg=CARD_COLOR,
+                bd=2,
+                relief="groove",
+                padx=18,
+                pady=12
+            )
+            card.pack(side="left", padx=8)
+
+            tk.Label(
+                card,
+                text=title,
+                font=("Asul", 10, "bold"),
+                bg=CARD_COLOR,
+                fg=TEXT_GRAY
+            ).pack()
+
+            tk.Label(
+                card,
+                text=str(value),
+                font=("Asul", 18, "bold"),
+                bg=CARD_COLOR,
+                fg=color
+            ).pack()
+
+        create_card(card_frame, "Safe", safe, SAGE_GREEN)
+        create_card(card_frame, "Suspicious", suspicious, "#B8860B")
+        create_card(card_frame, "Phishing", phishing, "#B22222")
+        create_card(card_frame, "Moved", quarantined, PRIMARY_BLUE)
+
+        # Chart
+        chart_frame = tk.Frame(root, bg=BG_COLOR)
+        chart_frame.pack(pady=15)
+
         labels = ["Safe", "Suspicious", "Phishing"]
-        values = [safe, suspicious, phishing]
 
-        fig, ax = plt.subplots(figsize=(4, 4))
+        fig, ax = plt.subplots(figsize=(4.5, 4.2))
+        fig.patch.set_facecolor("#EEF6F1")
+        ax.set_facecolor("#EEF6F1")
 
         ax.pie(
-            values,
+            chart_values,
             labels=labels,
             autopct="%1.0f%%",
-            startangle=90
+            startangle=90,
+            colors=["#D4EDDA", "#FFF3CD", "#F8D7DA"],
+            textprops={"fontsize": 9}
         )
 
-        ax.set_title("Email Classification Distribution")
+        ax.set_title(
+            "Email Classification Distribution",
+            fontsize=12,
+            color="#1E3A5F"
+        )
 
-        # Embed chart into Tkinter
-        canvas = FigureCanvasTkAgg(fig, master=root)
+        canvas = FigureCanvasTkAgg(fig, master=chart_frame)
         canvas.draw()
-        canvas.get_tk_widget().pack(pady=10)
+        canvas.get_tk_widget().pack()
 
-        # -----------------------------
-        # Cleansed message
-        # -----------------------------
+        # Footer message
+        if phishing > 0:
+            footer_text = "Review likely phishing emails and move unsafe messages to spam."
+            footer_color = "#B22222"
+        elif suspicious > 0:
+            footer_text = "Some emails need review before interacting with links or attachments."
+            footer_color = "#B8860B"
+        else:
+            footer_text = "No major phishing threats detected."
+            footer_color = SAGE_GREEN
+
         tk.Label(
             root,
-            text="You have been cleansed!",
-            font=("Asul", 16, "bold"),
-            fg="#1E90FF",
-            bg="#f0f8ff"
-        ).pack(side="bottom", pady=20)
+            text=footer_text,
+            font=("Asul", 12, "bold"),
+            fg=footer_color,
+            bg=BG_COLOR,
+            wraplength=520,
+            justify="center"
+        ).pack(pady=(10, 20))
