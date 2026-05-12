@@ -1,12 +1,9 @@
 """
-DistilBERT Training Script for Phishing Email Detection
-
-This script mirrors the structure of our existing TF-IDF + Logistic Regression
-training pipeline, but replaces the model with a transformer-based classifier.
+DistilBERT Training
 
 Key goals:
 1. Train DistilBERT to classify phishing vs legitimate emails.
-2. Preserve our 3-tier output system (SAFE / SUSPICIOUS / LIKELY_PHISHING).
+2. Preserve 3-tier output system (SAFE / SUSPICIOUS / LIKELY_PHISHING) from og model.
 3. Tune thresholds using a calibration dataset.
 4. Save the trained model so it can later be used by the application.
 
@@ -96,7 +93,7 @@ def urgent_language_hits(text: str):
 
 
 # Determine a probability threshold that achieves the desired precision.
-# This is useful for determining the "LIKELY_PHISHING" threshold
+# Great for determining the "LIKELY_PHISHING" threshold
 # where we want extremely few false positives. Same exact concept as previous training model.
 
 # Have to change this again. At first it was not strict enough and then it was too strict and caused the recall to collapse.

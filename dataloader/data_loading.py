@@ -1,5 +1,4 @@
 """
-Use this for documentation purposes:
 Purpose:
 - Load all raw phishing/legitimate email CSVs from data/raw
 - Standardize datasets that use different column names
@@ -144,7 +143,6 @@ after = len(df)
 print(f"Dropped {before - after} rows with missing labels")
 
 # Force labels to integer 0/1 format
-# This assumes your label/target columns are already binary-compatible.
 df["label_binary"] = df["label_binary"].astype(int)
 
 # --------------------------------------------------
